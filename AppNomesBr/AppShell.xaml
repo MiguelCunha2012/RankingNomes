@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<Shell
+    x:Class="AppNomesBr.AppShell"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:local="clr-namespace:AppNomesBr"
+    xmlns:pages="clr-namespace:AppNomesBr.Pages"
+    Shell.FlyoutBehavior="Flyout"
+    Shell.TabBarIsVisible="False"
+    Title="AppNomesBr">
+
+    <FlyoutItem FlyoutDisplayOptions="AsMultipleItems">
+        <ShellContent
+            Title="Boas vindas"
+            ContentTemplate="{DataTemplate local:MainPage}"
+            Route="MainPage" />
+
+        <ShellContent
+            Title="Raking Top 20 Nomes BR"
+            ContentTemplate="{DataTemplate pages:RankingNomesBrasileiros}"
+            Route="RankingNomesBrasileiros" />
+
+        <ShellContent
+            Title="Meu Ranking"
+            ContentTemplate="{DataTemplate pages:NovaConsultaNome}"
+            Route="NovaConsultaNome" />
+    </FlyoutItem>
+
+</Shell>
