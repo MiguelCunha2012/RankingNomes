@@ -6,9 +6,8 @@
     <ScrollView>
         <VerticalStackLayout Padding="12" Spacing="10">
             <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto">
-                <Entry x:Name="TxtMunicipioCodigo"
-                       Grid.Column="0"
-                       Placeholder="Código IBGE do município (ex.: 3550308)" />
+                <Entry x:Name="TxtMunicipioNome" Grid.Column="0"
+                       Placeholder="Nome do município (ex.: São Paulo)" />
                 <Picker x:Name="PckSexo"
                         Grid.Column="1"
                         WidthRequest="140"
