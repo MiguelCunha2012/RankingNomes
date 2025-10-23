@@ -5,12 +5,12 @@
              Title="Meu Ranking">
     <VerticalStackLayout Padding="12" Spacing="10">
         <Label Text="Inserir o nome" VerticalOptions="Center" HorizontalOptions="Center" />
-        <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto">
+        <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto" ColumnSpacing="5">
             <Entry Placeholder="Pedro|Maria|Ana|Joao" x:Name="TxtNome" Grid.Column="0"/>
             <Picker x:Name="PckSexo"
                     Grid.Column="1"
                     WidthRequest="120"
-                    Title="Sexo">
+                    Title="Sexo (Opcional)">
                 <Picker.Items>
                     <x:String>M</x:String>
                     <x:String>F</x:String>
@@ -28,27 +28,27 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <Label Text="Nomes" FontSize="18" FontAttributes="Bold" Grid.Column="0" />
-                    <Label Text="Sexo" FontSize="18" FontAttributes="Bold" Grid.Column="1" />
-                    <Label Text="Ocorrências" FontSize="18" FontAttributes="Bold" Grid.Column="2" />
-                    <Label Text="Pos. Ranking" FontSize="18" FontAttributes="Bold" Grid.Column="3" />
+                    <Label Text="Nome" FontSize="18" FontAttributes="Bold" Grid.Column="0" HorizontalTextAlignment="Start"/>
+                    <Label Text="Sexo" FontSize="18" FontAttributes="Bold" Grid.Column="1" HorizontalTextAlignment="Center"/>
+                    <Label Text="Ocorrências" FontSize="18" FontAttributes="Bold" Grid.Column="2" HorizontalTextAlignment="End"/>
+                    <Label Text="Ranking" FontSize="18" FontAttributes="Bold" Grid.Column="3" HorizontalTextAlignment="End" />
                 </Grid>
             </CollectionView.Header>
             <CollectionView.ItemTemplate>
                 <DataTemplate>
-                    <Grid Padding="5">
+                    <Grid Padding="5" ColumnSpacing="10">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <Label Text="{Binding Nome}" FontSize="14" FontAttributes="Bold" Grid.Column="0" />
-                        <Label Text="{Binding Sexo}" FontSize="14" Grid.Column="1" />
-                        <Label Text="{Binding Frequencia}" FontSize="14" FontAttributes="Bold" Grid.Column="2" />
-                        <Label Text="{Binding Ranking}" FontSize="14" FontAttributes="Bold" Grid.Column="3" />
+                        <Label Text="{Binding Nome}" FontSize="14" FontAttributes="Bold" Grid.Column="0" VerticalOptions="Center" HorizontalTextAlignment="Start"/>
+                        <Label Text="{Binding Sexo}" FontSize="14" Grid.Column="1" VerticalOptions="Center" HorizontalTextAlignment="Center"/>
+                        <Label Text="{Binding Frequencia}" FontSize="14" FontAttributes="Bold" Grid.Column="2" VerticalOptions="Center" HorizontalTextAlignment="End"/>
+                        <Label Text="{Binding Ranking}" FontSize="14" FontAttributes="Bold" Grid.Column="3" VerticalOptions="Center" HorizontalTextAlignment="End"/>
                     </Grid>
                 </DataTemplate>
             </CollectionView.ItemTemplate>

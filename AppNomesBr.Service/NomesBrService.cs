@@ -7,9 +7,13 @@ using AppNomesBr.Domain.Interfaces.Repositories;
 using AppNomesBr.Domain.Entities;
 using System.Text;
 using System.Text.Json.Serialization;
-using System.Net.Http; // Adicionado
-using System.Linq;      // Adicionado
-using Microsoft.Maui.ApplicationModel; // Adicionado para MainThread
+using System.Net.Http; 
+using System.Linq;     
+using Microsoft.Maui.ApplicationModel; 
+using System; 
+using System.Collections.Generic; 
+using System.Threading.Tasks; 
+using System.Globalization; 
 
 namespace AppNomesBr.Service
 {
@@ -18,15 +22,14 @@ namespace AppNomesBr.Service
         private readonly INomesApi ibgeNomesApiService;
         private readonly ILogger<NomesBrService> logger;
         private readonly INomesBrRepository nomesBrRepository;
-        private readonly IHttpClientFactory httpClientFactory; // Adicionado
+        private readonly IHttpClientFactory httpClientFactory;
 
-        // Construtor modificado
         public NomesBrService(INomesApi ibgeNomesApiService, ILogger<NomesBrService> logger, INomesBrRepository nomesBrRepository, IHttpClientFactory httpClientFactory)
         {
             this.ibgeNomesApiService = ibgeNomesApiService;
             this.logger = logger;
             this.nomesBrRepository = nomesBrRepository;
-            this.httpClientFactory = httpClientFactory; // Adicionado
+            this.httpClientFactory = httpClientFactory;
         }
 
         public async Task<RankingNomesRoot[]> ListaTop20Nacional()
@@ -35,14 +38,28 @@ namespace AppNomesBr.Service
             {
                 logger.LogInformation("Consultando top 20 nomes no Brasil");
                 var result = await ibgeNomesApiService.RetornaCensosNomesRanking();
+                if (string.IsNullOrWhiteSpace(result) || !result.TrimStart().StartsWith("["))
+                {
+                    logger.LogWarning("API RetornaCensosNomesRanking retornou resultado vazio ou inválido.");
+                    return [];
+                }
                 var rankingNomesRoot = JsonSerializer.Deserialize<RankingNomesRoot[]>(result);
                 if (rankingNomesRoot == null)
-                    throw new InvalidDataException($"Metodo: \"{nameof(ListaTop20Nacional)}\" a variavel \"rankingNomesRoot\" eh nula!");
+                {
+                    logger.LogError("Deserialização de ListaTop20Nacional resultou em nulo.");
+                    return [];
+                }
+
                 return rankingNomesRoot;
+            }
+            catch (JsonException jsonEx)
+            {
+                logger.LogError(jsonEx, "[ERRO JSON] Falha ao deserializar ListaTop20Nacional: {Message}", jsonEx.Message);
+                return [];
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "[ERRO]: {Message}", ex.Message);
+                logger.LogError(ex, "[ERRO GERAL] em ListaTop20Nacional: {Message}", ex.Message);
                 return [];
             }
         }
@@ -51,204 +68,354 @@ namespace AppNomesBr.Service
         {
             try
             {
-                logger.LogInformation("Consultando top 20 nomes filtrado. Sexo: {Sexo}, Localidade: {Localidade}", sexo, codigoMunicipioIbge);
+                logger.LogInformation("Consultando top 20 nomes filtrado. Sexo: {Sexo}, Localidade: {Localidade}", sexo ?? "N/A", codigoMunicipioIbge ?? "N/A");
                 var result = await ibgeNomesApiService.RetornaCensosNomesRanking(sexo, codigoMunicipioIbge);
+                
+                if (string.IsNullOrWhiteSpace(result) || !result.TrimStart().StartsWith("["))
+                {
+                    logger.LogWarning("API RetornaCensosNomesRanking (filtrado) retornou resultado vazio ou inválido para Sexo={Sexo}, Localidade={Localidade}.", sexo ?? "N/A", codigoMunicipioIbge ?? "N/A");
+                    return [];
+                }
                 var rankingNomesRoot = JsonSerializer.Deserialize<RankingNomesRoot[]>(result);
-                return rankingNomesRoot ?? [];
+                return rankingNomesRoot ?? []; 
+            }
+            catch (JsonException jsonEx)
+            {
+                logger.LogError(jsonEx, "[ERRO JSON] Falha ao deserializar ListaTop20 (filtrado) para Sexo={Sexo}, Localidade={Localidade}: {Message}", sexo ?? "N/A", codigoMunicipioIbge ?? "N/A", jsonEx.Message);
+                return [];
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "[ERRO]: {Message}", ex.Message);
+                logger.LogError(ex, "[ERRO GERAL] em ListaTop20 (filtrado) para Sexo={Sexo}, Localidade={Localidade}: {Message}", sexo ?? "N/A", codigoMunicipioIbge ?? "N/A", ex.Message);
                 return [];
             }
         }
 
         public async Task InserirNovoRegistroNoRanking(string nome, string? sexo = null)
         {
+            var nomeNormalizado = nome?.Trim().ToUpperInvariant();
+            if (string.IsNullOrWhiteSpace(nomeNormalizado))
+            {
+                logger.LogWarning("Nome inválido fornecido para InserirNovoRegistroNoRanking.");
+                return;
+            }
+
             try
             {
-                logger.LogInformation("Inserir novo registro no ranking");
+                logger.LogInformation("Iniciando processo para inserir/atualizar nome: {Nome}, Sexo: {Sexo}", nomeNormalizado, sexo ?? "N/A");
 
-                var result = await ibgeNomesApiService.RetornaCensosNomesPeriodo(nome);
-                var frequenciaPeriodo = JsonSerializer.Deserialize<NomeFrequenciaPeriodoRoot[]>(result);
-
-                if (frequenciaPeriodo == null || frequenciaPeriodo.Length == 0 || frequenciaPeriodo[0] == null || frequenciaPeriodo[0].Resultado == null || frequenciaPeriodo[0].Resultado?.Count == 0)
+                var resultApi = await ibgeNomesApiService.RetornaCensosNomesPeriodo(nomeNormalizado);
+                if (string.IsNullOrWhiteSpace(resultApi) || !resultApi.TrimStart().StartsWith("["))
                 {
-                    throw new InvalidDataException("Erro ao buscar pelos dados do nome informado");
+                    logger.LogWarning("API RetornaCensosNomesPeriodo retornou resultado vazio ou inválido para o nome: {Nome}", nomeNormalizado);
+                    MainThread.BeginInvokeOnMainThread(async () => {
+                        if (Application.Current?.MainPage != null)
+                            await Application.Current.MainPage.DisplayAlert("Aviso", $"Não foram encontrados dados de frequência para '{nomeNormalizado}' na base do IBGE.", "OK");
+                    });
+                    return;
                 }
 
-                var resultado = frequenciaPeriodo[0].Resultado!;
-                if (resultado == null)
+                NomeFrequenciaPeriodoRoot[]? frequenciaPeriodo = null;
+                try
                 {
-                    throw new InvalidDataException("Resultado é nulo após verificação anterior.");
+                    frequenciaPeriodo = JsonSerializer.Deserialize<NomeFrequenciaPeriodoRoot[]>(resultApi);
+                }
+                catch (JsonException jsonEx)
+                {
+                    logger.LogError(jsonEx, "[ERRO JSON] Falha ao deserializar RetornaCensosNomesPeriodo para {Nome}: {Message}", nomeNormalizado, jsonEx.Message);
+                    throw new InvalidDataException($"Falha ao processar dados da API do IBGE para o nome: {nomeNormalizado}", jsonEx); // Re-lança para o catch externo
                 }
 
-                var novoRegistro = new NomesBr
+
+                if (frequenciaPeriodo == null || frequenciaPeriodo.Length == 0 || frequenciaPeriodo[0]?.Resultado == null || !frequenciaPeriodo[0].Resultado.Any())
                 {
-                    Nome = nome,
-                    Periodo = FormataPeriodo(resultado),
-                    Ranking = 1,
-                    Frequencia = resultado.Sum(x => x.Frequencia),
-                    Sexo = string.IsNullOrWhiteSpace(sexo) ? null : sexo?.Trim().ToUpperInvariant()
-                };
+                    logger.LogWarning("Não foram encontrados dados de frequência na API do IBGE para o nome: {Nome}", nomeNormalizado);
+                    MainThread.BeginInvokeOnMainThread(async () => {
+                        if (Application.Current?.MainPage != null)
+                            await Application.Current.MainPage.DisplayAlert("Aviso", $"Não foram encontrados dados de frequência para '{nomeNormalizado}' na base do IBGE.", "OK");
+                    });
+                    return;
+                }
 
-                List<NomesBr> antigos = await nomesBrRepository.GetAll();
-                antigos.Add(novoRegistro);
-                await AtualizarRanking(antigos);
+                var resultadoApi = frequenciaPeriodo[0].Resultado!;
+                long frequenciaTotal = resultadoApi.Sum(x => x.Frequencia);
+                string periodoFormatado = FormataPeriodo(resultadoApi);
+                string? sexoFormatado = string.IsNullOrWhiteSpace(sexo) ? null : sexo.Trim().ToUpperInvariant();
 
-                // Re-busca a lista ordenada para pegar o ranking correto após a atualização
-                var listaAtualizada = await nomesBrRepository.GetAll();
-                var registroInserido = listaAtualizada.FirstOrDefault(r => r.Nome == novoRegistro.Nome); // Encontra o registro recém-inserido/atualizado
-                novoRegistro.Ranking = registroInserido?.Ranking ?? antigos.Count; // Atualiza o ranking do objeto antes de criar/atualizar
+                var todosRegistrosAntes = await nomesBrRepository.GetAll();
+                var registroExistente = todosRegistrosAntes?.FirstOrDefault(r => r.Nome.Equals(nomeNormalizado, StringComparison.OrdinalIgnoreCase)); // Adiciona verificação de nulo
 
-                // Verifica se o nome já existe para decidir entre Create e Update
-                var registroExistente = antigos.FirstOrDefault(r => r.Nome.Equals(novoRegistro.Nome, StringComparison.OrdinalIgnoreCase));
                 if (registroExistente != null)
                 {
-                    novoRegistro.Id = registroExistente.Id; // Garante que o ID correto seja usado para Update
-                    await nomesBrRepository.Update(novoRegistro);
-                    logger.LogInformation("Registro atualizado para o nome: {Nome}", nome);
+                    logger.LogInformation("Nome '{Nome}' já existe. Atualizando frequência ({Frequencia}), período ({Periodo}) e sexo ({Sexo}).", nomeNormalizado, frequenciaTotal, periodoFormatado, sexoFormatado ?? "N/A");
+                    registroExistente.Frequencia = frequenciaTotal;
+                    registroExistente.Periodo = periodoFormatado;
+                    registroExistente.Sexo = sexoFormatado;
+                    await nomesBrRepository.Update(registroExistente);
                 }
                 else
                 {
+                    logger.LogInformation("Nome '{Nome}' não existe. Criando novo registro com Frequencia={Frequencia}, Periodo={Periodo}, Sexo={Sexo}.", nomeNormalizado, frequenciaTotal, periodoFormatado, sexoFormatado ?? "N/A");
+                    var novoRegistro = new NomesBr
+                    {
+                        Nome = nomeNormalizado,
+                        Periodo = periodoFormatado,
+                        Frequencia = frequenciaTotal,
+                        Sexo = sexoFormatado,
+                        Ranking = 0 
+                    };
                     await nomesBrRepository.Create(novoRegistro);
-                    logger.LogInformation("Novo registro criado para o nome: {Nome}", nome);
                 }
 
+                await RecalcularEAtualizarTodosOsRankings();
+                logger.LogInformation("Processo para {Nome} concluído.", nomeNormalizado);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "[ERRO]: {Message}", ex.Message);
+                logger.LogError(ex, "[ERRO GERAL] Falha ao inserir/atualizar registro no ranking para {Nome}: {Message}", nomeNormalizado, ex.Message);
+                MainThread.BeginInvokeOnMainThread(async () => {
+                    if (Application.Current?.MainPage != null)
+                        await Application.Current.MainPage.DisplayAlert("Erro", $"Ocorreu um erro ao processar o nome '{nomeNormalizado}'. Verifique os logs.", "OK");
+                });
             }
         }
-
+        
 
         public async Task<RankingNomesRoot[]> ListaMeuRanking()
         {
             var consultaTodos = await nomesBrRepository.GetAll();
-            ArgumentNullException.ThrowIfNull(consultaTodos);
+            if (consultaTodos == null)
+            {
+                logger.LogWarning("GetAll retornou nulo ao buscar Meu Ranking.");
+                return [];
+            }
+
 
             var retorno = new List<RankingNomesRoot>
             {
                 new RankingNomesRoot { Resultado = new List<RankingNome>() }
             };
 
-            // Ordena aqui antes de criar o DTO de retorno
-            var consultaOrdenada = consultaTodos.OrderBy(x => x.Ranking).ToList();
+            var consultaOrdenada = consultaTodos.OrderBy(x => x.Ranking).ThenBy(x => x.Nome).ToList(); 
 
             for (int i = 0; i < consultaOrdenada.Count; i++)
             {
+                if (consultaOrdenada[i] == null) continue; 
+
                 var novo = new RankingNome
                 {
                     Nome = consultaOrdenada[i].Nome,
                     Ranking = consultaOrdenada[i].Ranking,
-                    Frequencia = consultaOrdenada[i].Frequencia
-                    // Se quiser exibir o sexo no "Meu Ranking", adicione:
-                    // Sexo = consultaTodos[i].Sexo
+                    Frequencia = consultaOrdenada[i].Frequencia,
+                    Sexo = consultaOrdenada[i].Sexo
                 };
 
-                retorno[0].Resultado?.Add(novo);
+                retorno[0].Resultado?.Add(novo); 
             }
 
-            // A ordenação já foi feita antes do loop
-            // retorno[0].Resultado = retorno[0].Resultado?.OrderBy(x => x.Ranking).ToList();
             return retorno.ToArray();
         }
 
         private static string FormataPeriodo(List<FrequenciaPeriodo>? periodo)
         {
-            ArgumentNullException.ThrowIfNull(periodo);
+           
+            if (periodo == null || periodo.Count == 0) return string.Empty;
 
-            // Garante que a lista não está vazia antes de acessar índices
-            if (periodo.Count == 0) return string.Empty;
+          
+            var periodosValidos = periodo.Where(p => !string.IsNullOrWhiteSpace(p?.Periodo) && p.Periodo.Contains("[") && p.Periodo.Contains(",") && p.Periodo.Contains("]")).ToList();
+            if (periodosValidos.Count == 0) return string.Empty;
 
 
-            string primeiroPeriodo = periodo[0].Periodo;
-            string? ultimoPeriodo = periodo[^1].Periodo; // ^1 pega o último elemento
+            string primeiroPeriodoStr = periodosValidos[0].Periodo;
+            string ultimoPeriodoStr = periodosValidos[^1].Periodo;
 
-            if (primeiroPeriodo == ultimoPeriodo || string.IsNullOrEmpty(ultimoPeriodo))
+            if (primeiroPeriodoStr == ultimoPeriodoStr)
             {
-                // Retorna apenas o primeiro período se for o único ou se o último for inválido
-                return primeiroPeriodo ?? string.Empty;
+                
+                try
+                {
+                    string anoUnicoInicial = primeiroPeriodoStr.TrimStart('[').Split(',')[0].Trim();
+                    string anoUnicoFinal = primeiroPeriodoStr.Split(',')[1].TrimEnd(']').Trim();
+                    
+                    if (int.TryParse(anoUnicoInicial, out _) && int.TryParse(anoUnicoFinal, out _))
+                    {
+                        return $"[{anoUnicoInicial} - {anoUnicoFinal}]";
+                    }
+                }
+                catch { }
+                return primeiroPeriodoStr; 
             }
 
-            StringBuilder sb = new();
-            // Extrai o ano inicial do primeiro período
-            string anoInicial = primeiroPeriodo.TrimStart('[').Split(',')[0].Trim();
-            // Extrai o ano final do último período
-            string anoFinal = ultimoPeriodo.Split(',')[1].TrimEnd(']').Trim();
+            try
+            {
+                StringBuilder sb = new();
+                string anoInicial = primeiroPeriodoStr.TrimStart('[').Split(',')[0].Trim();
+                string anoFinal = ultimoPeriodoStr.Split(',')[1].TrimEnd(']').Trim();
 
-            sb.Append('[');
-            sb.Append(anoInicial);
-            sb.Append(" - ");
-            sb.Append(anoFinal);
-            sb.Append(']');
+        
+                if (!int.TryParse(anoInicial, out _) || !int.TryParse(anoFinal, out _))
+                {
+                    return $"{primeiroPeriodoStr} a {ultimoPeriodoStr}"; 
+                }
 
-            return sb.ToString();
 
+                sb.Append('[');
+                sb.Append(anoInicial);
+                sb.Append(" - ");
+                sb.Append(anoFinal);
+                sb.Append(']');
+                return sb.ToString();
+            }
+            catch (Exception ex) 
+            {
+                
+                return $"{primeiroPeriodoStr} a {ultimoPeriodoStr}";
+            }
         }
 
+
+        
         private static List<NomesBr> OrganizarRanking(List<NomesBr> nomes)
         {
-            var ordenados = nomes.OrderByDescending(x => x.Frequencia).ToList();
+          
+            if (nomes == null || !nomes.Any()) return new List<NomesBr>();
+
+           
+            var ordenados = nomes
+                .OrderByDescending(x => x.Frequencia)
+                .ThenBy(x => x.Nome, StringComparer.OrdinalIgnoreCase) 
+                .ToList();
+
             for (int i = 0; i < ordenados.Count; i++)
-                ordenados[i].Ranking = i + 1;
+                ordenados[i].Ranking = i + 1; 
 
             return ordenados;
         }
 
-        private async Task AtualizarRanking(List<NomesBr> nomes)
+    
+        private async Task RecalcularEAtualizarTodosOsRankings()
         {
-            // Reorganiza o ranking baseado na frequência atual
-            var nomesOrdenados = OrganizarRanking(new List<NomesBr>(nomes)); // Cria cópia para não modificar a original inesperadamente
-
-            // Atualiza cada registro no banco de dados com seu novo ranking
-            foreach (var nomeParaAtualizar in nomesOrdenados)
+            logger.LogInformation("Iniciando RecalcularEAtualizarTodosOsRankings...");
+            try
             {
-                // Busca o registro existente no banco pelo nome (ou ID se já tiver)
-                // É importante garantir que você está atualizando o registro correto
-                var registroExistente = await nomesBrRepository.GetAll().ContinueWith(t => t.Result.FirstOrDefault(n => n.Nome.Equals(nomeParaAtualizar.Nome, StringComparison.OrdinalIgnoreCase)));
-
-                if (registroExistente != null)
+                var todosRegistros = await nomesBrRepository.GetAll();
+                if (todosRegistros == null || !todosRegistros.Any())
                 {
-                    registroExistente.Ranking = nomeParaAtualizar.Ranking; // Atualiza apenas o ranking
-                                                                           // Opcional: Atualizar outros campos se necessário, como Frequencia se ela puder mudar
-                                                                           // registroExistente.Frequencia = nomeParaAtualizar.Frequencia;
-                    await nomesBrRepository.Update(registroExistente);
+                    logger.LogInformation("Nenhum registro encontrado para atualizar rankings.");
+                    return;
                 }
-                // else: O registro pode ter sido removido ou é o novo registro ainda não salvo.
-                // O novo registro será salvo com o ranking correto após esta chamada.
+                logger.LogDebug("Recalculando rankings para {Count} registros.", todosRegistros.Count);
+
+                
+                var registrosComNovoRanking = OrganizarRanking(todosRegistros);
+
+                logger.LogInformation("Atualizando rankings no banco de dados...");
+                int updatedCount = 0;
+                int errorCount = 0; 
+
+                foreach (var registroCalculado in registrosComNovoRanking)
+                {
+                    if (registroCalculado.Id > 0)
+                    {
+                      
+                        logger.LogDebug("Processando ID {Id} (Nome: {Nome}). Ranking calculado: {CalculadoRanking}",
+                                         registroCalculado.Id, registroCalculado.Nome, registroCalculado.Ranking);
+
+                        NomesBr? registroDoBanco = null;
+                        try
+                        {
+                            registroDoBanco = await nomesBrRepository.GetById(registroCalculado.Id);
+
+                            if (registroDoBanco != null)
+                            {
+                              
+                                logger.LogDebug("  Registro encontrado no banco. Ranking atual no banco: {BancoRanking}. Tentando atualizar para: {CalculadoRanking}",
+                                                 registroDoBanco.Ranking, registroCalculado.Ranking);
+
+                                if (registroDoBanco.Ranking != registroCalculado.Ranking)
+                                {
+                                    registroDoBanco.Ranking = registroCalculado.Ranking;
+                                    await nomesBrRepository.Update(registroDoBanco); 
+                                    updatedCount++;
+                                 
+                                    logger.LogDebug("  Update chamado para ID {Id}. Ranking agora definido como {NovoRanking}.",
+                                                    registroDoBanco.Id, registroDoBanco.Ranking);
+
+                                }
+                                else
+                                {
+                                    logger.LogDebug("  Ranking já está correto ({Ranking}). Nenhuma atualização necessária.", registroDoBanco.Ranking);
+                                }
+                            }
+                            else
+                            {
+                                logger.LogWarning("  Registro com ID {Id} (Nome: {Nome}) não encontrado no banco via GetById durante atualização de ranking.",
+                                                   registroCalculado.Id, registroCalculado.Nome);
+                                errorCount++;
+                            }
+                        }
+                        catch (Exception updateEx) // Captura erro específico da atualização
+                        {
+                            logger.LogError(updateEx, "  [ERRO no UPDATE] Falha ao atualizar ranking para ID {Id} (Nome: {Nome}).",
+                                            registroCalculado.Id, registroCalculado.Nome);
+                            errorCount++;
+                        }
+                    }
+                    else
+                    {
+                        logger.LogWarning("Tentativa de atualizar ranking para registro sem ID (Nome: {Nome}).", registroCalculado.Nome);
+                        errorCount++;
+                    }
+                }
+                logger.LogInformation("Atualização de rankings no banco concluída. {UpdatedCount} registros modificados. {ErrorCount} erros.", updatedCount, errorCount);
             }
+            catch (Exception ex)
+            {
+               
+                logger.LogError(ex, "[ERRO CRÍTICO] Falha durante RecalcularEAtualizarTodosOsRankings: {Message}\nStackTrace: {StackTrace}", ex.Message, ex.StackTrace);
+            }
+            logger.LogInformation("Finalizando RecalcularEAtualizarTodosOsRankings.");
         }
+       
 
 
-        // --- Adicionado ---
-        // Método auxiliar para buscar código IBGE pelo nome do município
         private async Task<string?> GetCodigoIbgePorNomeMunicipio(string nomeMunicipio)
         {
             try
             {
                 logger.LogInformation("Consultando código IBGE para o município: {NomeMunicipio}", nomeMunicipio);
-                var client = httpClientFactory.CreateClient();
-                var url = "https://servicodados.ibge.gov.br/api/v1/localidades/municipios"; // API de Localidades
+                var client = httpClientFactory.CreateClient("IBGELocalidades"); 
+                var url = "https://servicodados.ibge.gov.br/api/v1/localidades/municipios";
                 var response = await client.GetStringAsync(url);
 
                 var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-                var municipios = JsonSerializer.Deserialize<List<MunicipioIbgeResponse>>(response, options);
-
-                var nomeMunicipioNormalizado = nomeMunicipio.Trim().ToUpperInvariant();
-
-                var municipioEncontrado = municipios?
-                    .FirstOrDefault(m => m.Nome?.Trim().ToUpperInvariant() == nomeMunicipioNormalizado);
-
-                if (municipioEncontrado == null)
+                List<MunicipioIbgeResponse>? municipios = null;
+                try
                 {
-                    // Tentativa de remover acentos para encontrar correspondência
-                    var nomeSemAcento = RemoverAcentos(nomeMunicipioNormalizado);
-                    municipioEncontrado = municipios?
-                        .FirstOrDefault(m => RemoverAcentos(m.Nome?.Trim().ToUpperInvariant()) == nomeSemAcento);
+                    municipios = JsonSerializer.Deserialize<List<MunicipioIbgeResponse>>(response, options);
+                }
+                catch (JsonException jsonEx)
+                {
+                    logger.LogError(jsonEx, "[ERRO JSON] Falha ao deserializar lista de municípios: {Message}", jsonEx.Message);
+                    return null;
                 }
 
+
+                if (municipios == null) return null;
+
+                var nomeMunicipioNormalizado = nomeMunicipio.Trim().ToUpperInvariant();
+                var nomeSemAcento = RemoverAcentos(nomeMunicipioNormalizado);
+
+                
+                var municipioEncontrado = municipios
+                    .FirstOrDefault(m => m.Nome?.Trim().ToUpperInvariant() == nomeMunicipioNormalizado);
+
+               
+                if (municipioEncontrado == null)
+                {
+                    municipioEncontrado = municipios
+                        .FirstOrDefault(m => RemoverAcentos(m.Nome?.Trim().ToUpperInvariant()) == nomeSemAcento);
+                }
 
                 if (municipioEncontrado == null)
                 {
@@ -256,47 +423,61 @@ namespace AppNomesBr.Service
                     return null;
                 }
 
-                return municipioEncontrado.Id?.ToString(); // O ID é o código IBGE
+                logger.LogInformation("Código IBGE encontrado para '{NomeMunicipio}': {CodigoIbge}", nomeMunicipio, municipioEncontrado.Id);
+                return municipioEncontrado.Id?.ToString();
             }
             catch (HttpRequestException httpEx) when (httpEx.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                logger.LogError(httpEx, "[ERRO HTTP {StatusCode}] ao buscar código IBGE para {NomeMunicipio}: Endpoint não encontrado ou município inválido.", httpEx.StatusCode, nomeMunicipio);
-                return null; // Retorna null ou lança uma exceção específica
+                logger.LogError(httpEx, "[ERRO HTTP {StatusCode}] ao buscar código IBGE para {NomeMunicipio}: Endpoint não encontrado.", httpEx.StatusCode, nomeMunicipio);
+                return null;
+            }
+            catch (HttpRequestException httpEx)
+            {
+                logger.LogError(httpEx, "[ERRO HTTP {StatusCode}] ao buscar código IBGE para {NomeMunicipio}: {Message}", httpEx.StatusCode ?? System.Net.HttpStatusCode.InternalServerError, nomeMunicipio, httpEx.Message);
+                return null;
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "[ERRO] ao buscar código IBGE para {NomeMunicipio}: {Message}", nomeMunicipio, ex.Message);
+                logger.LogError(ex, "[ERRO GERAL] ao buscar código IBGE para {NomeMunicipio}: {Message}", nomeMunicipio, ex.Message);
                 return null;
             }
         }
-        // Função auxiliar para remover acentos (simples)
+
         private static string RemoverAcentos(string? texto)
         {
             if (string.IsNullOrEmpty(texto)) return string.Empty;
 
-            var sb = new StringBuilder();
-            var arrayTexto = texto.Normalize(NormalizationForm.FormD).ToCharArray();
-
-            foreach (char letra in arrayTexto)
+            try
             {
-                if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(letra) != System.Globalization.UnicodeCategory.NonSpacingMark)
+                var sb = new StringBuilder();
+               
+                var arrayTexto = texto.Normalize(NormalizationForm.FormD).ToCharArray();
+
+                foreach (char letra in arrayTexto)
                 {
-                    sb.Append(letra);
+                   
+                    if (CharUnicodeInfo.GetUnicodeCategory(letra) != UnicodeCategory.NonSpacingMark)
+                    {
+                        sb.Append(letra);
+                    }
                 }
+                
+                return sb.ToString().Normalize(NormalizationForm.FormC);
             }
-            return sb.ToString().Normalize(NormalizationForm.FormC);
+            catch (Exception ex) 
+            {
+               
+                return texto; 
+            }
         }
 
 
-        // Implementação do novo método da interface
         public async Task<RankingNomesRoot[]> ListaTop20PorNomeMunicipio(string nomeMunicipio, string? sexo = null)
         {
             if (string.IsNullOrWhiteSpace(nomeMunicipio))
             {
                 logger.LogWarning("Nome do município não fornecido para ListaTop20PorNomeMunicipio.");
-                // Se o nome estiver vazio, talvez retornar o ranking nacional? Ou vazio?
-                // return await ListaTop20Nacional(); // Opção 1: Retorna nacional
-                return []; // Opção 2: Retorna vazio
+                return [];
             }
 
             string? codigoIbge = await GetCodigoIbgePorNomeMunicipio(nomeMunicipio);
@@ -304,7 +485,6 @@ namespace AppNomesBr.Service
             if (string.IsNullOrWhiteSpace(codigoIbge))
             {
                 logger.LogError("Não foi possível encontrar o código IBGE para o município: {NomeMunicipio}", nomeMunicipio);
-                // Informa o usuário que o município não foi encontrado
                 MainThread.BeginInvokeOnMainThread(async () =>
                 {
                     if (Application.Current?.MainPage != null)
@@ -312,33 +492,27 @@ namespace AppNomesBr.Service
                         await Application.Current.MainPage.DisplayAlert("Erro", $"Município '{nomeMunicipio}' não encontrado.", "OK");
                     }
                 });
-                return []; // Retorna um array vazio para indicar que nada foi encontrado
+                return [];
             }
 
-            // Chama o método existente que usa o código IBGE
             return await ListaTop20(sexo, codigoIbge);
         }
-        // --- Fim Adicionado ---
 
 
-        // Classe para deserializar resposta do ViaCEP (Manter se usar ListaTop20PorCep)
+        
         public class ViaCepResponse
         {
             [JsonPropertyName("ibge")]
-            public string Ibge { get; set; } = string.Empty; // Inicializar para evitar null
-            // ... outros campos se necessário
+            public string Ibge { get; set; } = string.Empty;
         }
 
-        // --- Adicionado ---
-        // Classe auxiliar para deserializar a resposta da API de Localidades do IBGE
         private class MunicipioIbgeResponse
         {
             [JsonPropertyName("id")]
-            public long? Id { get; set; } // O ID é o código IBGE
+            public long? Id { get; set; }
 
             [JsonPropertyName("nome")]
             public string? Nome { get; set; }
         }
-        // --- Fim Adicionado ---
     }
 }

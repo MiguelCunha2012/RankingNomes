@@ -24,7 +24,6 @@ namespace AppNomesBr
                     fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold");
                 });
 
-            // Esta linha já deve registrar o IHttpClientFactory indiretamente
             NativeInjector.RegisterServices(builder.Services, startup.Configuration);
             RegisterPages(builder.Services);
 
@@ -35,7 +34,6 @@ namespace AppNomesBr
             return builder.Build();
         }
 
-        // --- Mantenha o método RegisterPages e a classe Startup como estão ---
         public static void RegisterPages(IServiceCollection services)
         {
             #region Singleton
@@ -54,7 +52,6 @@ namespace AppNomesBr
             #endregion
         }
     }
-
     public class Startup
     {
         public IConfiguration Configuration { get; }
